@@ -60,5 +60,6 @@ watchers:
             Review the following RSS feed entries and select only the most relevant and interesting ones.
             Provide a concise digest with titles and links.
             If no entries are relevant, respond with: "No relevant entries found."
-  
-# - For LLM features (email summaries, RSS digests), set OPENAI_API_KEY environment variable
+
+# Plugins manage their own configuration files.
+# For LLM features (email summaries, RSS digests), edit ./plugins/configs/llm.json.
