@@ -12,7 +12,6 @@ dependencies = [
 	"python-ntfy",
 	"psutil",
 	"feedparser",
-	"httpx",
 	"openai",
 ]
 
