@@ -4,6 +4,7 @@ Provides async interface for sending notifications
 """
 
 import asyncio
+import re
 from abc import ABC, abstractmethod
 
 from loguru import logger
@@ -96,6 +97,61 @@ class NtfyNotifier(BaseNotifier):
             logger.debug(f"Ntfy notification sent: {markdown_content[:100]}...")
         except Exception as e:
             logger.error(f"Error sending ntfy notification: {e}", exc_info=True)
+
+
+class LarkNotifier(BaseNotifier):
+    """Lark notifier that sends messages to Lark (Feishu) via webhook"""
+
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self.webhook_url = config.get("webhook_url")
+        if not self.webhook_url:
+            raise ValueError("webhook_url must be provided for LarkNotifier")
+
+        self.session = None
+        logger.info("Lark notifier initialized")
+
+    async def send(self, markdown_content: str) -> None:
+        """
+        Send notification to Lark via webhook.
+
+        Args:
+            markdown_content: The notification content in markdown format
+        """
+        if not self.enabled:
+            return
+
+        try:
+            # Check if session is initialized
+            if self.session is None:
+                # Import here to avoid dependency if not using LarkNotifier
+                import aiohttp
+                self.session = aiohttp.ClientSession()
+
+            # Try to get the title using regex
+            title_match = re.search(r"^#\s+(.+)$", markdown_content.strip(), re.MULTILINE)
+            title = title_match.group(1) if title_match else "Notification"
+
+            # Send the markdown content as a Lark message
+            payload = {
+                "msg_type": "interactive",
+                "card": {
+                    "schema": "2.0",
+                    "header": {
+                        "title": {"tag": "plain_text", "content": title},
+                        "template": "blue",
+                    },
+                    "body": {
+                        "elements": [{"tag": "markdown","content": markdown_content,}],
+                    }
+                }
+            }
+            async with self.session.post(self.webhook_url, json=payload) as response:
+                if response.status != 200:
+                    text = await response.text()
+                    raise Exception(f"Failed to send Lark notification: {response.status}, {text}")
+        except Exception as e:
+            logger.error(f"Error sending Lark notification: {e}", exc_info=True)
 
 
 class Notifier:
