@@ -119,6 +119,7 @@ class RSSFeed:
         if not feed:
             return []
 
+        total_entries = len(feed.entries)
         new_entries = []
 
         for entry in feed.entries:
@@ -142,8 +143,11 @@ class RSSFeed:
 
             new_entries.append(entry_data)
 
+        # Always log the results for visibility
         if new_entries:
-            logger.info(f"Found {len(new_entries)} new entries in {self}")
+            logger.info(f"Found {len(new_entries)} new entries (out of {total_entries} total) in {self}")
+        else:
+            logger.info(f"No new entries found (checked {total_entries} entries) in {self}")
 
         return new_entries
 
@@ -163,7 +167,7 @@ class RSSFeed:
                 f"## {i}. {entry['title']}\n"
                 f"[Link]({entry['link']})\n"
                 f"From {entry['published']}\n"
-                f"{entry['summary'][:500]}...\n"  # Limit summary length
+                f"{entry['summary']}\n"  # Include full summary for LLM analysis
             )
         return "\n---\n".join(formatted)
 
