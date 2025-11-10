@@ -25,6 +25,7 @@ config.yaml
 logs/
 *.bkup
 plugins/configs/
+cache/
 
 # uv
 .python-version

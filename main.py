@@ -103,9 +103,7 @@ async def discover_watchers():
             else:
                 logger.warning(f"Module {module_name} has no init() function")
         except Exception as e:
-            logger.error(
-                "Failed to load watcher {}: {}", module_name, e, exc_info=True
-            )
+            logger.error("Failed to load watcher {}: {}", module_name, e, exc_info=True)
 
     return watcher_modules
 
@@ -189,8 +187,6 @@ async def main(verbose: bool = False, config_file: str = "config.yaml"):
     startup_markdown = """# 🚀 AtomicWatcherAquarium Started!
 
 System initialized successfully!
-
-## Active Watchers
 
 """ + "\n".join(f"- `{name}`" for name in active_watchers)
 

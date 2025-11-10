@@ -424,7 +424,7 @@ def init(notifier: Notifier, config: dict) -> Optional[Coroutine[Any, Any, None]
         Async coroutine or None if disabled
     """
     if not config:
-        logger.info("IMAP watcher is not configured")
+        logger.warning("IMAP watcher is not configured")
         return None
 
     if not config.get("enabled", False):
