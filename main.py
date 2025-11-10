@@ -103,7 +103,9 @@ async def discover_watchers():
             else:
                 logger.warning(f"Module {module_name} has no init() function")
         except Exception as e:
-            logger.error(f"Failed to load watcher {module_name}: {e}", exc_info=True)
+            logger.error(
+                "Failed to load watcher {}: {}", module_name, e, exc_info=True
+            )
 
     return watcher_modules
 
