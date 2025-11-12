@@ -23,6 +23,8 @@ DEFAULT_SUMMARY_PROMPT = (
     "Please summarize the following email content into a brief notification. "
     "Ensure that your output is only one sentence long and captures the main idea effectively."
 )
+DEFAULT_LLM_BODY_LIMIT = 10000  # Characters sent to LLM for summarization
+DEFAULT_DISPLAY_BODY_LIMIT = 2500  # Characters displayed in notifications
 
 
 class EmailAccount:
@@ -45,6 +47,12 @@ class EmailAccount:
         summary_config = account_config.get("summary", {})
         self.summary_prompt = summary_config.get("prompt", DEFAULT_SUMMARY_PROMPT)
         self.summary_model = summary_config.get("model_name")
+
+        # Get length limit configuration
+        self.llm_body_limit = account_config.get("llm_body_limit", DEFAULT_LLM_BODY_LIMIT)
+        self.display_body_limit = account_config.get(
+            "display_body_limit", DEFAULT_DISPLAY_BODY_LIMIT
+        )
 
         # Track seen message IDs to avoid duplicates
         self.seen_message_ids: set[str] = set()
@@ -324,7 +332,7 @@ class ImapMonitor:
             logger.info(f"Summarizing email from {sender}")
             try:
                 summary = await llm_query(
-                    message=f"Subject: {subject}\n\nBody:\n{body[:10000]}",  # Limit body length
+                    message=f"Subject: {subject}\n\nBody:\n{body[:account.llm_body_limit]}",
                     model=account.summary_model,
                     system_message=account.summary_prompt,
                 )
@@ -338,8 +346,8 @@ class ImapMonitor:
             except Exception as e:
                 logger.error(f"Failed to summarize email: {e}")
                 # Fallback to original content
-                truncated_body = body[:2500]
-                if len(body) > 2500:
+                truncated_body = body[: account.display_body_limit]
+                if len(body) > account.display_body_limit:
                     truncated_body += "..."
                 markdown_content = f"""# 📧 {subject}
 
@@ -349,8 +357,8 @@ class ImapMonitor:
 """
         else:
             # Use original content (truncated)
-            truncated_body = body[:2500]
-            if len(body) > 2500:
+            truncated_body = body[: account.display_body_limit]
+            if len(body) > account.display_body_limit:
                 truncated_body += "..."
             markdown_content = f"""# 📧 {subject}
 
