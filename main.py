@@ -72,7 +72,7 @@ def setup_logging(enable_console_logging: bool = False, config_file: str = "conf
     logs_dir.mkdir(exist_ok=True)
 
     # Always log to file
-    log_name = Path(config_file).stem.replace("config", "awa")
+    log_name = Path(config_file).stem  # Use config file stem directly as log name prefix
     logger.add(
         logs_dir / f"{log_name}.log",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
