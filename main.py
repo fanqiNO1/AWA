@@ -48,13 +48,14 @@ def expand_env_vars(config):
 
 
 # Setup loguru logging
-def setup_logging(enable_console_logging: bool = False):
+def setup_logging(enable_console_logging: bool = False, config_file: str = "config.yaml"):
     """
     Setup logging configuration.
 
     Args:
         enable_console_logging: If True, logs will be written to console.
                                If False, only file logging is enabled for cleaner UX.
+        config_file: Path to configuration file (for log name reference)
     """
     logger.remove()  # Remove default handler
 
@@ -71,8 +72,9 @@ def setup_logging(enable_console_logging: bool = False):
     logs_dir.mkdir(exist_ok=True)
 
     # Always log to file
+    log_name = Path(config_file).stem.replace("config", "awa")
     logger.add(
-        logs_dir / "awa.log",
+        logs_dir / f"{log_name}.log",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
         level="INFO",
         rotation="10 MB",
@@ -117,7 +119,7 @@ async def main(verbose: bool = False, config_file: str = "config.yaml"):
         logger.debug(f"Loaded environment variables from {env_path}")
 
     # Setup logging based on verbose flag
-    setup_logging(enable_console_logging=verbose)
+    setup_logging(enable_console_logging=verbose, config_file=config_file)
 
     # Load configuration
     config_path = (
