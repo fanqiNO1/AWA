@@ -47,6 +47,7 @@ AtomicWatcherAquarium/
 AWA uses a single `config.yaml` file. Here's a quick example:
 
 ```yaml
+log_file: "awa.log"
 notifier:
   console:
     enabled: true
