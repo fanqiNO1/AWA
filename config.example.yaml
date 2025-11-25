@@ -13,6 +13,9 @@
 #   Store sensitive information (passwords, API keys, tokens) in .env file
 #   instead of committing them in config.yaml
 
+# Log file configuration
+log_file: "awa.log" # Path to log file
+
 # Notification providers configuration
 notifier:
   # Console notifier - displays notifications in terminal with rich markdown formatting

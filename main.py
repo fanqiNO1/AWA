@@ -48,13 +48,14 @@ def expand_env_vars(config):
 
 
 # Setup loguru logging
-def setup_logging(enable_console_logging: bool = False):
+def setup_logging(enable_console_logging: bool = False, log_file: str = "awa_config.log"):
     """
     Setup logging configuration.
 
     Args:
         enable_console_logging: If True, logs will be written to console.
                                If False, only file logging is enabled for cleaner UX.
+        log_file: Name of the log file
     """
     logger.remove()  # Remove default handler
 
@@ -72,7 +73,7 @@ def setup_logging(enable_console_logging: bool = False):
 
     # Always log to file
     logger.add(
-        logs_dir / "awa.log",
+        logs_dir / log_file,
         format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
         level="INFO",
         rotation="10 MB",
@@ -116,9 +117,6 @@ async def main(verbose: bool = False, config_file: str = "config.yaml"):
         load_dotenv(env_path)
         logger.debug(f"Loaded environment variables from {env_path}")
 
-    # Setup logging based on verbose flag
-    setup_logging(enable_console_logging=verbose)
-
     # Load configuration
     config_path = (
         Path(config_file)
@@ -139,6 +137,11 @@ async def main(verbose: bool = False, config_file: str = "config.yaml"):
     except Exception as e:
         logger.error(f"Failed to load {config_file}: {e}")
         sys.exit(1)
+
+    # Setup logging based on verbose flag
+    config_name = Path(config_file).stem
+    log_file = config.get("log_file", f"awa_{config_name}.log")
+    setup_logging(enable_console_logging=verbose, log_file=log_file)
 
     logger.info("AtomicWatcherAquarium starting")
 
