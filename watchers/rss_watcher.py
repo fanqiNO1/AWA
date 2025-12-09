@@ -2,18 +2,19 @@
 RSS Watcher - Monitors RSS feeds for new entries
 Sends notifications with LLM-curated digest of relevant entries
 
-Version 0.1.0 (c) Kunologist & Claude Opus 4.1
+Version 0.2.0 - Refactored with StateDiff plugin for persistent state tracking
 """
 
 import asyncio
 import hashlib
-from typing import Any, Coroutine, Optional
+from collections.abc import Coroutine
 
 import feedparser
 from loguru import logger
 
 from notifier import Notifier
 from plugins.llm import query as llm_query
+from plugins.state_diff import StateDiff, JsonSerializable
 
 
 # Default configuration values
@@ -24,38 +25,52 @@ DEFAULT_DIGEST_PROMPT = (
     "If no entries are relevant, respond with 'No relevant entries found.'"
 )
 
+type EntryData = dict[str, str]
+type ConfigDict = dict[str, str | int | bool | dict[str, str]]
+
 
 class RSSFeed:
-    """Represents a single RSS feed to monitor."""
+    """Represents a single RSS feed to monitor with persistent state tracking."""
 
-    def __init__(self, feed_config: dict):
+    def __init__(self, feed_config: ConfigDict, cache_id: str = "") -> None:
         """
         Initialize an RSS feed monitor.
 
         Args:
             feed_config: Configuration dict for this specific feed
+            cache_id: Unique identifier for the user/instance to separate caches
         """
-        self.url = feed_config["url"]
-        self.name = feed_config.get("name", self.url)
-        self.enabled = feed_config.get("enabled", True)
+        self.url: str = feed_config["url"]
+        self.name: str = feed_config.get("name", self.url)
+        self.enabled: bool = feed_config.get("enabled", True)
 
         # Digest configuration
-        self.enable_digest = feed_config.get("enable_digest", True)
+        self.enable_digest: bool = bool(feed_config.get("enable_digest", True))
         digest_config = feed_config.get("digest", {})
-        self.digest_prompt = digest_config.get("prompt", DEFAULT_DIGEST_PROMPT)
-        self.digest_model = digest_config.get("model_name")
+        digest_dict: dict[str, str] = digest_config if isinstance(digest_config, dict) else {}
+        self.digest_prompt: str = str(digest_dict.get("prompt", DEFAULT_DIGEST_PROMPT))
+        model_name = digest_dict.get("model_name")
+        self.digest_model: str = str(model_name) if model_name else ""
 
-        # Track seen entry IDs to avoid duplicates
-        self.seen_entry_ids: set[str] = set()
+        # Initialize StateDiff for persistent state tracking
+        # Use hash of URL combined with cache_id to ensure uniqueness per user per feed
+        feed_hash = hashlib.md5(self.url.encode()).hexdigest()
+        # Combine cache_id and feed_hash to create user-specific cache files
+        state_user_id = f"{cache_id}-{feed_hash}" if cache_id else feed_hash
+        self.state_diff: StateDiff = StateDiff(
+            app_id="rss_watcher",
+            user_id=state_user_id,
+            maximum_entries=1000  # Keep up to 1000 recent entries
+        )
 
         # First run flag - don't notify on first check to avoid spam
-        self.first_run = True
+        self.first_run: bool = True
 
     def __str__(self) -> str:
         """String representation of the feed."""
         return f"{self.name} ({self.url})"
 
-    def get_entry_id(self, entry: dict) -> str:
+    def get_entry_id(self, entry: feedparser.FeedParserDict) -> str:
         """
         Get unique ID for an RSS entry.
 
@@ -66,18 +81,18 @@ class RSSFeed:
             Unique ID string for the entry
         """
         # Try to use entry's id/guid first
-        if hasattr(entry, "id"):
-            return entry.id
-        if hasattr(entry, "guid"):
-            return entry.guid
+        if hasattr(entry, "id") and entry.id:  # type: ignore[attr-defined]
+            return str(entry.id)  # type: ignore[attr-defined]
+        if hasattr(entry, "guid") and entry.guid:  # type: ignore[attr-defined]
+            return str(entry.guid)  # type: ignore[attr-defined]
 
         # Fall back to hash of link + title
-        link = getattr(entry, "link", "")
-        title = getattr(entry, "title", "")
+        link = str(getattr(entry, "link", ""))
+        title = str(getattr(entry, "title", ""))
         content = f"{link}:{title}"
         return hashlib.md5(content.encode()).hexdigest()
 
-    async def fetch_feed(self) -> Optional[feedparser.FeedParserDict]:
+    async def fetch_feed(self) -> feedparser.FeedParserDict | None:
         """
         Fetch and parse the RSS feed.
 
@@ -87,13 +102,15 @@ class RSSFeed:
         try:
             logger.debug(f"Fetching RSS feed: {self}")
             # Use asyncio.to_thread for blocking feedparser call
-            feed = await asyncio.to_thread(feedparser.parse, self.url)
+            feed: feedparser.FeedParserDict = await asyncio.to_thread(
+                feedparser.parse, self.url  # type: ignore[arg-type]
+            )
 
             # Check for feed errors
-            if hasattr(feed, "bozo") and feed.bozo:
+            if hasattr(feed, "bozo") and feed.bozo:  # type: ignore[attr-defined]
                 if hasattr(feed, "bozo_exception"):
                     logger.warning(
-                        f"Feed parse warning for {self}: {feed.bozo_exception}"
+                        f"Feed parse warning for {self}: {feed.bozo_exception}"  # type: ignore[attr-defined]
                     )
 
             # Check if feed has entries
@@ -107,9 +124,28 @@ class RSSFeed:
             logger.error(f"Failed to fetch feed {self}: {e}", exc_info=True)
             return None
 
-    async def get_new_entries(self) -> list[dict[str, Any]]:
+    def extract_entry_data(self, entry: feedparser.FeedParserDict) -> EntryData:
         """
-        Fetch feed and return new entries.
+        Extract relevant data from a feed entry.
+
+        Args:
+            entry: Feed entry from feedparser
+
+        Returns:
+            Dictionary with entry data
+        """
+        return {
+            "id": self.get_entry_id(entry),
+            "title": str(getattr(entry, "title", "No Title")),
+            "link": str(getattr(entry, "link", "")),
+            "summary": str(getattr(entry, "summary", "")),
+            "published": str(getattr(entry, "published", "Unknown")),
+            "author": str(getattr(entry, "author", "Unknown")),
+        }
+
+    async def get_new_entries(self) -> list[EntryData]:
+        """
+        Fetch feed and return new entries using StateDiff.
 
         Returns:
             List of new entry dictionaries
@@ -118,31 +154,24 @@ class RSSFeed:
         if not feed:
             return []
 
-        total_entries = len(feed.entries)
-        new_entries = []
+        total_entries = len(feed.entries)  # type: ignore[attr-defined]
 
-        for entry in feed.entries:
-            entry_id = self.get_entry_id(entry)
+        # Extract all current entries
+        current_entries: list[JsonSerializable] = [
+            self.extract_entry_data(entry) for entry in feed.entries  # type: ignore[attr-defined]
+        ]
 
-            # Skip if already seen
-            if entry_id in self.seen_entry_ids:
-                continue
+        # Use StateDiff to get only new entries
+        new_entries_raw = await self.state_diff.diff(
+            current_entries, mode="incremental"
+        )
 
-            self.seen_entry_ids.add(entry_id)
+        # Cast back to EntryData list
+        new_entries: list[EntryData] = [
+            entry for entry in new_entries_raw if isinstance(entry, dict)
+        ]
 
-            # Extract entry data
-            entry_data = {
-                "id": entry_id,
-                "title": getattr(entry, "title", "No Title"),
-                "link": getattr(entry, "link", ""),
-                "summary": getattr(entry, "summary", ""),
-                "published": getattr(entry, "published", "Unknown"),
-                "author": getattr(entry, "author", "Unknown"),
-            }
-
-            new_entries.append(entry_data)
-
-        # Always log the results for visibility
+        # Log the results for visibility
         if new_entries:
             logger.info(
                 f"Found {len(new_entries)} new entries (out of {total_entries} total) in {self}"
@@ -154,7 +183,7 @@ class RSSFeed:
 
         return new_entries
 
-    def format_entries_for_llm(self, entries: list[dict[str, Any]]) -> str:
+    def format_entries_for_llm(self, entries: list[EntryData]) -> str:
         """
         Format entries for LLM processing.
 
@@ -164,12 +193,12 @@ class RSSFeed:
         Returns:
             Formatted string for LLM
         """
-        formatted = []
+        formatted: list[str] = []
         for i, entry in enumerate(entries, 1):
             formatted.append(
-                f"## {i}. {entry['title']}\n"
-                f"[Link]({entry['link']})\n"
-                f"From {entry['published']}\n"
+                f"## {i}. {entry['title']}\n" +
+                f"[Link]({entry['link']})\n" +
+                f"From {entry['published']}\n" +
                 f"{entry['summary']}\n"  # Include full summary for LLM analysis
             )
         return "\n---\n".join(formatted)
@@ -178,7 +207,7 @@ class RSSFeed:
 class RSSMonitor:
     """Monitors multiple RSS feeds and sends notifications for new entries."""
 
-    def __init__(self, notifier: Notifier, config: dict):
+    def __init__(self, notifier: Notifier, config: ConfigDict) -> None:
         """
         Initialize the RSS monitor.
 
@@ -186,26 +215,33 @@ class RSSMonitor:
             notifier: Notifier instance for sending alerts
             config: Configuration dictionary for the RSS watcher
         """
-        self.notifier = notifier
-        self.config = config
+        self.notifier: Notifier = notifier
+        self.config: ConfigDict = config
 
         # Load configuration with defaults
-        self.interval = config.get("interval_seconds", DEFAULT_INTERVAL_SECONDS)
+        self.interval: int = int(config.get("interval_seconds", DEFAULT_INTERVAL_SECONDS))
+
+        # Get cache_id from injected config name (for user-specific caching)
+        # This is automatically injected by main.py from the config filename
+        cache_id = str(config.get("_config_name", ""))
 
         # Initialize RSS feeds
         self.feeds: list[RSSFeed] = []
-        watching_configs = config.get("watching", [])
+        watching_configs_raw = config.get("watching", [])
+        watching_configs: list[ConfigDict] = (
+            watching_configs_raw if isinstance(watching_configs_raw, list) else []
+        )
 
         for feed_config in watching_configs:
             if not feed_config.get("enabled", True):
                 continue
 
-            feed = RSSFeed(feed_config)
+            feed = RSSFeed(feed_config, cache_id=cache_id)
             self.feeds.append(feed)
             logger.info(f"Added feed to watch: {feed}")
 
     async def process_entries(
-        self, feed: RSSFeed, entries: list[dict[str, Any]]
+        self, feed: RSSFeed, entries: list[EntryData]
     ) -> None:
         """
         Process new entries and send notification.
@@ -230,7 +266,7 @@ class RSSMonitor:
         # Format entries for LLM
         entries_text = feed.format_entries_for_llm(entries)
 
-        if feed.enable_digest:
+        if feed.enable_digest and feed.digest_model:
             # Use LLM to create digest
             logger.info(f"Generating digest for {len(entries)} entries from {feed}")
             try:
@@ -254,7 +290,7 @@ class RSSMonitor:
 """
 
             except Exception as e:
-                logger.error(f"Failed to generate digest: {e}")
+                logger.error(f"Failed to generate digest: {e}", exc_info=True)
                 # Fallback to simple list
                 markdown_content = self.format_simple_list_markdown(feed, entries)
         else:
@@ -265,7 +301,7 @@ class RSSMonitor:
         await self.notifier.send(markdown_content)
 
     def format_simple_list_markdown(
-        self, feed: RSSFeed, entries: list[dict[str, Any]]
+        self, feed: RSSFeed, entries: list[EntryData]
     ) -> str:
         """
         Format entries as simple markdown list without LLM.
@@ -277,7 +313,7 @@ class RSSMonitor:
         Returns:
             Formatted markdown string
         """
-        lines = ["# 📰 New RSS Entries\n\n"]
+        lines: list[str] = ["# 📰 New RSS Entries\n\n"]
         lines.append(f"> Feed: [{feed.name}]({feed.url})\n")
         lines.append(f"{len(entries)} new entries\n\n")
 
@@ -306,8 +342,8 @@ class RSSMonitor:
             return
 
         logger.info(
-            f"Starting RSS watcher | "
-            f"Interval: {self.interval}s | "
+            f"Starting RSS watcher | " +
+            f"Interval: {self.interval}s | " +
             f"Feeds: {len(self.feeds)}"
         )
 
@@ -326,7 +362,7 @@ class RSSMonitor:
         logger.info("RSS watcher stopped")
 
 
-async def watch_rss(notifier: Notifier, config: dict) -> None:
+async def watch_rss(notifier: Notifier, config: ConfigDict) -> None:
     """
     Monitor RSS feeds for new entries.
 
@@ -338,7 +374,7 @@ async def watch_rss(notifier: Notifier, config: dict) -> None:
     await monitor.monitor_loop()
 
 
-def init(notifier: Notifier, config: dict) -> Optional[Coroutine[Any, Any, None]]:
+def init(notifier: Notifier, config: ConfigDict) -> Coroutine[None, None, None] | None:
     """
     Initialize the RSS watcher.
 

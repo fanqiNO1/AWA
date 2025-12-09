@@ -82,5 +82,20 @@ watchers:
             Provide a concise digest with titles and links.
             If no entries are relevant, respond with: "No relevant entries found."
 
+  # OpenReview Watcher
+  # Monitors OpenReview submissions for new reviews, comments, and status changes
+  # Uses StateDiff plugin for persistent state tracking (stores in plugins/data/state_diff/)
+  openreview_watcher:
+    enabled: false # Set to true to enable this watcher
+    interval_seconds: 120 # Check every 2 minutes (120 seconds)
+    clients:
+      # First OpenReview account example
+      - username: "${OPENREVIEW_USERNAME}" # Your OpenReview username (recommended: store in .env)
+        password: "${OPENREVIEW_PASSWORD}" # Your OpenReview password (recommended: store in .env)
+        user_id: "~John_Doe1" # Your OpenReview user ID (e.g., ~First_Last1)
+        summary_model: "gpt-4o-mini" # LLM model for summarizing reviews/comments
+        # Note: State is automatically managed by StateDiff plugin, no manual cache configuration needed
+
 # Plugins manage their own configuration files.
-# For LLM features (email summaries, RSS digests), edit ./plugins/configs/llm.json.
+# For LLM features (email summaries, RSS digests, OpenReview summaries), edit ./plugins/configs/llm.json.
+# State management is handled by StateDiff plugin, which stores data in ./plugins/data/state_diff/

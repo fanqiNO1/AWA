@@ -9,7 +9,8 @@ import asyncio
 import email
 import imaplib
 from email.header import decode_header
-from typing import Any, Coroutine, Optional
+from typing import Any
+from collections.abc import Coroutine
 
 from loguru import logger
 
@@ -58,7 +59,7 @@ class EmailAccount:
         self.seen_message_ids: set[str] = set()
 
         # Connection state
-        self.mail: Optional[imaplib.IMAP4_SSL] = None
+        self.mail: None | imaplib.IMAP4_SSL = None
 
     def __str__(self) -> str:
         """String representation of the account."""
@@ -140,7 +141,7 @@ class EmailAccount:
             await self.disconnect()
             return []
 
-    async def fetch_email(self, msg_id: bytes) -> Optional[dict[str, Any]]:
+    async def fetch_email(self, msg_id: bytes) -> None | dict[str, Any]:
         """
         Fetch and parse a single email.
 
@@ -199,7 +200,7 @@ class EmailAccount:
             return None
 
     @staticmethod
-    def decode_header_value(header_value: Optional[str]) -> str:
+    def decode_header_value(header_value: None | str) -> str:
         """
         Decode email header value (handles encoded subjects/names).
         Also normalizes whitespace from folded headers.
@@ -428,7 +429,7 @@ async def watch_imap(notifier: Notifier, config: dict) -> None:
     await monitor.monitor_loop()
 
 
-def init(notifier: Notifier, config: dict) -> Optional[Coroutine[Any, Any, None]]:
+def init(notifier: Notifier, config: dict) -> None | Coroutine[Any, Any, None]:
     """
     Initialize the IMAP watcher.
 

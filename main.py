@@ -68,7 +68,7 @@ def setup_logging(enable_console_logging: bool = False, log_file: str = "awa_con
         )
 
     # Ensure logs directory exists
-    logs_dir = Path(__file__).parent / "logs"
+    logs_dir = Path(__file__).parent
     logs_dir.mkdir(exist_ok=True)
 
     # Always log to file
@@ -168,6 +168,10 @@ async def main(verbose: bool = False, config_file: str = "config.yaml"):
             # Get the specific config for this watcher module
             # This allows watchers/imap_watcher.py to use config key "imap_watcher"
             watcher_config = watchers_config.get(module_name, {})
+
+            # Inject the config name for watchers that need user-specific caching
+            # This allows multiple instances with different configs to have separate caches
+            watcher_config["_config_name"] = config_name
 
             # Pass only this watcher's config directly to its init function
             coro = module.init(notifier, watcher_config)

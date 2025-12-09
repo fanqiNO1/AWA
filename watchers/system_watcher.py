@@ -5,7 +5,8 @@ Sends notifications when usage exceeds thresholds
 
 import asyncio
 import time
-from typing import Any, Coroutine, Optional
+from typing import Any
+from collections.abc import Coroutine
 
 import psutil
 from loguru import logger
@@ -195,7 +196,7 @@ async def watch_system(notifier: Notifier, config: dict) -> None:
     await monitor.monitor_loop()
 
 
-def init(notifier: Notifier, config: dict) -> Optional[Coroutine[Any, Any, None]]:
+def init(notifier: Notifier, config: dict) -> None | Coroutine[Any, Any, None]:
     """
     Initialize the system watcher.
 

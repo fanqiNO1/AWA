@@ -3,7 +3,7 @@ name = "atomic-watcher-aquarium"
 version = "0.1.0"
 description = "A hackable, asynchronous, modular monitoring and notification system"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
 	"PyYAML",
 	"aiohttp",

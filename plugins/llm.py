@@ -44,11 +44,11 @@ def _initialize_clients():
         # Create httpx client if proxy is specified
         http_client = None
         if proxy:
-            http_client = httpx.AsyncClient(proxy=proxy)
+            http_client = httpx.AsyncClient(proxy=proxy, timeout=90)
 
         # Initialize AsyncOpenAI client
         _clients[client_name] = AsyncOpenAI(
-            api_key=api_key, base_url=base_url, http_client=http_client
+            api_key=api_key, base_url=base_url, http_client=http_client, timeout=90
         )
 
 
@@ -90,8 +90,8 @@ async def query(message: str, model: str, system_message: str = "") -> str:
 
     # Make async API call
     response = await client.chat.completions.create(
-        model=model_id, messages=messages, extra_body={"thinking": {"type": "disabled"}}
-    )
+        model=model_id, messages=messages
+    )   
 
     content = response.choices[0].message.content
     return content if content is not None else ""
