@@ -9,7 +9,9 @@ import asyncio
 import hashlib
 from collections.abc import Coroutine
 
+import aiohttp
 import feedparser
+import requests
 from loguru import logger
 
 from notifier import Notifier
@@ -44,6 +46,11 @@ class RSSFeed:
         self.name: str = feed_config.get("name", self.url)
         self.enabled: bool = feed_config.get("enabled", True)
 
+        # Proxy configuration
+        proxy_config = feed_config.get("proxy", "")
+        self.proxy: str = str(proxy_config) if proxy_config else ""
+        self._session: aiohttp.ClientSession | None = None
+
         # Digest configuration
         self.enable_digest: bool = bool(feed_config.get("enable_digest", True))
         digest_config = feed_config.get("digest", {})
@@ -62,9 +69,6 @@ class RSSFeed:
             user_id=state_user_id,
             maximum_entries=1000  # Keep up to 1000 recent entries
         )
-
-        # First run flag - don't notify on first check to avoid spam
-        self.first_run: bool = True
 
     def __str__(self) -> str:
         """String representation of the feed."""
@@ -92,6 +96,47 @@ class RSSFeed:
         content = f"{link}:{title}"
         return hashlib.md5(content.encode()).hexdigest()
 
+    def _fetch_feed_sync(self) -> feedparser.FeedParserDict:
+        """
+        Synchronous helper to fetch and parse RSS feed.
+        Supports optional proxy configuration.
+
+        Returns:
+            Parsed feed object from feedparser
+        """
+        if self.proxy:
+            # Use requests with proxy, then parse the content
+            proxies = {
+                "http": self.proxy,
+                "https": self.proxy,
+            }
+            response = requests.get(self.url, proxies=proxies, timeout=30)
+            response.raise_for_status()
+            return feedparser.parse(response.content)
+        else:
+            # Direct feedparser fetch without proxy
+            return feedparser.parse(self.url)
+
+    async def _fetch_feed_aiohttp(self) -> feedparser.FeedParserDict:
+        """
+        Asynchronous helper to fetch and parse RSS feed using aiohttp.
+        Supports optional proxy configuration.
+
+        Returns:
+            Parsed feed object from feedparser
+        """
+        if not self._session or self._session.closed:
+            self._session = aiohttp.ClientSession()
+
+        try:
+            async with self._session.get(self.url, proxy=self.proxy, timeout=30) as response:
+                response.raise_for_status()
+                content = await response.read()
+                return feedparser.parse(content)
+        except Exception as e:
+            logger.error(f"Error fetching feed {self} with aiohttp: {e}", exc_info=True)
+            return feedparser.FeedParserDict()
+
     async def fetch_feed(self) -> feedparser.FeedParserDict | None:
         """
         Fetch and parse the RSS feed.
@@ -100,11 +145,13 @@ class RSSFeed:
             Parsed feed object or None if failed
         """
         try:
-            logger.debug(f"Fetching RSS feed: {self}")
-            # Use asyncio.to_thread for blocking feedparser call
-            feed: feedparser.FeedParserDict = await asyncio.to_thread(
-                feedparser.parse, self.url  # type: ignore[arg-type]
-            )
+            proxy_info = f" (via proxy {self.proxy})" if self.proxy else ""
+            logger.warning(f"Fetching RSS feed: {self}{proxy_info}")
+            # Use asyncio.to_thread for blocking fetch call
+            # feed: feedparser.FeedParserDict = await asyncio.to_thread(
+            #     self._fetch_feed_sync
+            # )
+            feed: feedparser.FeedParserDict = await self._fetch_feed_aiohttp()
 
             # Check for feed errors
             if hasattr(feed, "bozo") and feed.bozo:  # type: ignore[attr-defined]
@@ -155,6 +202,8 @@ class RSSFeed:
             return []
 
         total_entries = len(feed.entries)  # type: ignore[attr-defined]
+        if total_entries == 0:
+            logger.warning("There is no entries in the fetched feed!")
 
         # Extract all current entries
         current_entries: list[JsonSerializable] = [
@@ -177,7 +226,7 @@ class RSSFeed:
                 f"Found {len(new_entries)} new entries (out of {total_entries} total) in {self}"
             )
         else:
-            logger.debug(
+            logger.warning(
                 f"No new entries found (checked {total_entries} entries) in {self}"
             )
 
@@ -253,16 +302,6 @@ class RSSMonitor:
         if not entries:
             return
 
-        # Skip notifications on first run to avoid spam
-        if feed.first_run:
-            logger.info(
-                f"First run for {feed}, skipping notification for {len(entries)} entries"
-            )
-            feed.first_run = False
-            return
-
-        feed.first_run = False
-
         # Format entries for LLM
         entries_text = feed.format_entries_for_llm(entries)
 
@@ -329,8 +368,11 @@ class RSSMonitor:
         """Check all configured RSS feeds for new entries."""
         for feed in self.feeds:
             try:
+                logger.info("I am going to get new entries")
                 new_entries = await feed.get_new_entries()
+                logger.info("I have got new entries and am going to process")
                 await self.process_entries(feed, new_entries)
+                logger.info("I have processed entries")
 
             except Exception as e:
                 logger.error(f"Error checking feed {feed}: {e}", exc_info=True)
@@ -349,7 +391,9 @@ class RSSMonitor:
 
         while True:
             try:
+                logger.info("I am going to check all feeds")
                 await self.check_all_feeds()
+                logger.info("I have checked all feeds")
                 await asyncio.sleep(self.interval)
 
             except asyncio.CancelledError:

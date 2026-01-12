@@ -27,6 +27,8 @@ logs/
 plugins/configs/
 cache/
 configs/
+*.log
+plugins/data/
 
 # uv
 .python-version
